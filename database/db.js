@@ -1,35 +1,25 @@
-const sqlite3 = require('sqlite3').verbose();
+const Database = require('better-sqlite3');
 
-const db = new sqlite3.Database('./database/tod.db', (err) => {
+const db = new Database('./database/tod.db');
 
-    if (err) {
-        console.error(err.message);
-    } else {
-        console.log('📦 Banco SQLite conectado.');
-    }
+console.log('📦 Banco SQLite conectado.');
 
-});
+db.prepare(`
+    CREATE TABLE IF NOT EXISTS boss_logs (
 
-db.serialize(() => {
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
 
-    db.run(`
-        CREATE TABLE IF NOT EXISTS boss_logs (
+        boss_name TEXT,
+        kill_type TEXT,
+        drop_status TEXT,
 
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tod TEXT,
+        earliest TEXT,
+        latest TEXT,
 
-            boss_name TEXT,
-            kill_type TEXT,
-            drop_status TEXT,
+        alert_sent INTEGER DEFAULT 0
 
-            tod TEXT,
-            earliest TEXT,
-            latest TEXT,
-
-            alert_sent INTEGER DEFAULT 0
-
-        )
-    `);
-
-});
+    )
+`).run();
 
 module.exports = db;

@@ -14,17 +14,8 @@ const {
 const bosses = require('./bosses');
 const db = require('./database/db');
 
-// ========================================
-// CONFIG
-// ========================================
-
 const ROLE_ID = '1504538619187298468';
-
 const ALERT_CHANNEL_ID = '1506302612872626341';
-
-// ========================================
-// CLIENT
-// ========================================
 
 const client = new Client({
     intents: [
@@ -34,10 +25,6 @@ const client = new Client({
     ]
 });
 
-// ========================================
-// DISCORD TIMESTAMP
-// ========================================
-
 const discordTime = (date) => {
 
     const unix = Math.floor(date.getTime() / 1000);
@@ -46,31 +33,21 @@ const discordTime = (date) => {
 
 };
 
-// ========================================
-// READY
-// ========================================
-
 client.once('ready', () => {
 
     console.log(`Bot online: ${client.user.tag}`);
 
-    // ========================================
-    // ALERT LOOP
-    // ========================================
-
     setInterval(async () => {
 
-        const now = new Date();
+        try {
 
-        db.all(`
-            SELECT *
-            FROM boss_logs
-            WHERE alert_sent = 0
-        `, async (err, rows) => {
+            const rows = db.prepare(`
+                SELECT *
+                FROM boss_logs
+                WHERE alert_sent = 0
+            `).all();
 
-            if (err) {
-                return console.error(err);
-            }
+            const now = new Date();
 
             for (const row of rows) {
 
@@ -78,87 +55,82 @@ client.once('ready', () => {
 
                 if (now >= earliest) {
 
-                    try {
+                    const channel =
+                        client.channels.cache.get(ALERT_CHANNEL_ID);
 
-                        const channel =
-                            client.channels.cache.get(ALERT_CHANNEL_ID);
+                    if (!channel) continue;
 
-                        if (!channel) continue;
-
-                        const bossData = bosses.find(
+                    const bossData =
+                        bosses.find(
                             b => b.name === row.boss_name
                         );
 
-                        const embed = new EmbedBuilder()
+                    const embed = new EmbedBuilder()
 
-                            .setColor(bossData.color)
+                        .setColor(bossData.color)
 
-                            .setTitle(`🟢 ${row.boss_name} entrou em janela!`)
+                        .setTitle(`🟢 ${row.boss_name} entrou em janela!`)
 
-                            .setThumbnail(bossData.image)
+                        .setThumbnail(bossData.image)
 
-                            .setDescription(
+                        .setDescription(
 `━━━━━━━━━━━━━━━━━━
 ⚔️ RAID OPEN
 O boss entrou oficialmente em janela.
 ━━━━━━━━━━━━━━━━━━`
-                            )
+                        )
 
-                            .addFields(
+                        .addFields(
 
-                                {
-                                    name: '🟢 Início da Janela',
-                                    value: discordTime(earliest),
-                                    inline: true
-                                },
+                            {
+                                name: '🟢 Início da Janela',
+                                value: discordTime(earliest),
+                                inline: true
+                            },
 
-                                {
-                                    name: '🔴 Final da Janela',
-                                    value: discordTime(
+                            {
+                                name: '🔴 Final da Janela',
+                                value:
+                                    discordTime(
                                         new Date(row.latest)
                                     ),
-                                    inline: true
-                                }
 
-                            )
+                                inline: true
+                            }
 
-                            .setFooter({
-                                text: 'Wall-E TOD Tracker'
-                            });
+                        )
 
-                        await channel.send({
-
-                            content: `<@&${ROLE_ID}>`,
-
-                            embeds: [embed]
-
+                        .setFooter({
+                            text: 'Wall-E TOD Tracker'
                         });
 
-                        db.run(`
-                            UPDATE boss_logs
-                            SET alert_sent = 1
-                            WHERE id = ?
-                        `, [row.id]);
+                    await channel.send({
 
-                    } catch (error) {
+                        content: `<@&${ROLE_ID}>`,
 
-                        console.error(error);
+                        embeds: [embed]
 
-                    }
+                    });
+
+                    db.prepare(`
+                        UPDATE boss_logs
+                        SET alert_sent = 1
+                        WHERE id = ?
+                    `).run(row.id);
 
                 }
 
             }
 
-        });
+        } catch (error) {
+
+            console.error(error);
+
+        }
 
     }, 60000);
 
 });
-
-// ========================================
-// INTERACTIONS
-// ========================================
 
 client.on(Events.InteractionCreate, async interaction => {
 
@@ -175,210 +147,32 @@ client.on(Events.InteractionCreate, async interaction => {
         if (interaction.commandName === 'tod') {
 
             const menu = new StringSelectMenuBuilder()
+
                 .setCustomId('boss_select')
+
                 .setPlaceholder('Escolha o boss');
 
             bosses.forEach(boss => {
 
                 menu.addOptions({
+
                     label: boss.name,
+
                     value: boss.name
+
                 });
 
             });
 
             const row = new ActionRowBuilder()
+
                 .addComponents(menu);
 
             await interaction.reply({
+
                 content: '👹 Escolha um boss:',
+
                 components: [row]
-            });
-
-        }
-
-        // ========================================
-        // /NEXT
-        // ========================================
-
-        if (interaction.commandName === 'next') {
-
-            const bossName =
-                interaction.options.getString('boss');
-
-            db.get(`
-                SELECT *
-                FROM boss_logs
-                WHERE boss_name = ?
-                ORDER BY id DESC
-                LIMIT 1
-            `, [bossName], async (err, row) => {
-
-                if (err) {
-
-                    console.error(err);
-
-                    return interaction.reply({
-                        content: '❌ Erro ao consultar banco.'
-                    });
-
-                }
-
-                if (!row) {
-
-                    return interaction.reply({
-                        content:
-`❌ Nenhum registro encontrado para ${bossName}`
-                    });
-
-                }
-
-                const bossData = bosses.find(
-                    b => b.name === row.boss_name
-                );
-
-                const killText =
-                    row.kill_type === 'ally'
-                        ? '🟢 Nossa Ally matou'
-                        : '🔴 Ally inimiga matou';
-
-                const dropText =
-                    row.drop_status === 'yes'
-                        ? `✔️ ${bossData.mainDrop} dropou`
-                        : `❌ ${bossData.mainDrop} não dropou`;
-
-                const embed = new EmbedBuilder()
-
-                    .setColor(bossData.color)
-
-                    .setTitle(`👑 ${row.boss_name}`)
-
-                    .setThumbnail(bossData.image)
-
-                    .setDescription(
-`━━━━━━━━━━━━━━━━━━
-⚔️ STATUS DA RAID
-${killText}
-
-💎 DROP
-${dropText}
-━━━━━━━━━━━━━━━━━━`
-                    )
-
-                    .addFields(
-
-                        {
-                            name: '💀 Último TOD',
-                            value: discordTime(new Date(row.tod)),
-                            inline: false
-                        },
-
-                        {
-                            name: '🟢 Início da Janela',
-                            value: discordTime(new Date(row.earliest)),
-                            inline: true
-                        },
-
-                        {
-                            name: '🔴 Final da Janela',
-                            value: discordTime(new Date(row.latest)),
-                            inline: true
-                        }
-
-                    )
-
-                    .setFooter({
-                        text: 'Wall-E TOD Tracker'
-                    });
-
-                await interaction.reply({
-
-                    embeds: [embed]
-
-                });
-
-            });
-
-        }
-
-        // ========================================
-        // /HISTORY
-        // ========================================
-
-        if (interaction.commandName === 'history') {
-
-            const bossName =
-                interaction.options.getString('boss');
-
-            db.all(`
-                SELECT *
-                FROM boss_logs
-                WHERE boss_name = ?
-                ORDER BY id DESC
-                LIMIT 10
-            `, [bossName], async (err, rows) => {
-
-                if (err) {
-
-                    console.error(err);
-
-                    return interaction.reply({
-                        content: '❌ Erro ao consultar banco.'
-                    });
-
-                }
-
-                if (!rows.length) {
-
-                    return interaction.reply({
-                        content:
-`❌ Nenhum histórico encontrado para ${bossName}`
-                    });
-
-                }
-
-                const bossData = bosses.find(
-                    b => b.name === bossName
-                );
-
-                const embed = new EmbedBuilder()
-
-                    .setColor(bossData.color)
-
-                    .setTitle(`📜 Histórico — ${bossName}`)
-
-                    .setThumbnail(bossData.image);
-
-                rows.forEach((row, index) => {
-
-                    const killText =
-                        row.kill_type === 'ally'
-                            ? '🟢 Nossa Ally'
-                            : '🔴 Ally inimiga';
-
-                    const dropText =
-                        row.drop_status === 'yes'
-                            ? '✔️ Dropou'
-                            : '❌ Não dropou';
-
-                    embed.addFields({
-
-                        name: `#${index + 1}`,
-
-                        value:
-`💀 ${discordTime(new Date(row.tod))}
-⚔️ ${killText}
-💎 ${dropText}`
-
-                    });
-
-                });
-
-                await interaction.reply({
-
-                    embeds: [embed]
-
-                });
 
             });
 
@@ -394,23 +188,32 @@ ${dropText}
 
         if (interaction.customId === 'boss_select') {
 
-            const selectedBoss = interaction.values[0];
+            const selectedBoss =
+                interaction.values[0];
 
-            const bossData = bosses.find(
-                b => b.name === selectedBoss
-            );
+            const bossData =
+                bosses.find(
+                    b => b.name === selectedBoss
+                );
 
             const allyButton = new ButtonBuilder()
+
                 .setCustomId(`ally_${bossData.name}`)
+
                 .setLabel('Nossa Ally')
+
                 .setStyle(ButtonStyle.Success);
 
             const enemyButton = new ButtonBuilder()
+
                 .setCustomId(`enemy_${bossData.name}`)
+
                 .setLabel('Ally Inimiga')
+
                 .setStyle(ButtonStyle.Danger);
 
             const buttonRow = new ActionRowBuilder()
+
                 .addComponents(
                     allyButton,
                     enemyButton
@@ -552,9 +355,10 @@ ${dropText}
             const bossName = parts[2];
             const killType = parts[3];
 
-            const bossData = bosses.find(
-                b => b.name === bossName
-            );
+            const bossData =
+                bosses.find(
+                    b => b.name === bossName
+                );
 
             const now = new Date();
 
@@ -619,8 +423,10 @@ ${dropText}
                 )
 
                 .setFooter({
+
                     text:
 `Reportado por ${interaction.user.username}`
+
                 });
 
             await interaction.editReply({
@@ -633,7 +439,7 @@ ${dropText}
 
             });
 
-            db.run(`
+            db.prepare(`
                 INSERT INTO boss_logs (
                     boss_name,
                     kill_type,
@@ -644,14 +450,14 @@ ${dropText}
                     alert_sent
                 )
                 VALUES (?, ?, ?, ?, ?, ?, 0)
-            `, [
+            `).run(
                 bossData.name,
                 killType,
                 dropStatus,
                 now.toISOString(),
                 earliest.toISOString(),
                 latest.toISOString()
-            ]);
+            );
 
         }
 
